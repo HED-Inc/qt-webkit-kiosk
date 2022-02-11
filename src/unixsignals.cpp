@@ -92,7 +92,7 @@ void UnixSignals::start()
             qFatal("Unable to set signal handler on USR2");
         }
     } else {
-        qDebug("No listeners for signal USR1");
+        qDebug("No listeners for signal USR2");
     }
 #else
     qWarning("No signal USR2 defined");
@@ -101,6 +101,7 @@ void UnixSignals::start()
 
 void UnixSignals::stop()
 {
+    qDebug("Closing UnixSignals::sockPair");
     UnixSignals::sockPair.close();
 }
 
