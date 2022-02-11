@@ -974,6 +974,7 @@ void MainWindow::attachStyles()
  */
 void MainWindow::unixSignalQuit()
 {
+    handler->stop();
     // No cache clean - quick exit
     qDebug(">> Quit Signal catched. Exiting...");
     QApplication::exit(0);
