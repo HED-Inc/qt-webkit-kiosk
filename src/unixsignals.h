@@ -35,6 +35,7 @@ Q_SIGNALS:
 
 private slots:
     void handleSig(QByteArray);
+    void printThreads(QByteArray);
 
 private:
     void handleSignal(int);

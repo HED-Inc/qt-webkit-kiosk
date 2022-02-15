@@ -34,11 +34,13 @@ bool SocketPair::create()
 	clientConnection.setSocketOption( QAbstractSocket::KeepAliveOption, 1 );
 
     clientConnection.connectToHost(QHostAddress::LocalHost, server.serverPort(), QIODevice::WriteOnly);
+    qDebug("Created a socketpair");
     return true;
 }
 
 void SocketPair::newConnection()
 {
+    qDebug("newConnection signal received.");
     serverConnection = server.nextPendingConnection();
 
 	serverConnection->setSocketOption( QAbstractSocket::LowDelayOption, 1 );
@@ -53,8 +55,10 @@ void SocketPair::newConnection()
 
 void SocketPair::readServerData()
 {
+    qDebug("Checking if serverConnection has data");
     QByteArray data = serverConnection->readAll();
     if (data.length()) {
+        qDebug("serverConnection has data, emitting sigData");
         emit sigData(data);
     }
 }

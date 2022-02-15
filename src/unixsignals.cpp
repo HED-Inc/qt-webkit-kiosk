@@ -1,6 +1,7 @@
 #include <signal.h>
 #include <QApplication>
 #include <QDebug>
+#include <QThread>
 #include "unixsignals.h"
 
 SocketPair UnixSignals::sockPair;
@@ -17,7 +18,21 @@ UnixSignals::UnixSignals( QObject *parent )
     if (!UnixSignals::sockPair.create())
         qFatal("Unable to create signal socket pair");
 
-    connect(&UnixSignals::sockPair, SIGNAL(sigData(QByteArray)), this, SLOT(handleSig(QByteArray)));
+    auto connected = connect(&UnixSignals::sockPair,
+            SIGNAL(sigData(QByteArray)), this, SLOT(handleSig(QByteArray)));
+
+    connect(&UnixSignals::sockPair,
+            SIGNAL(sigData(QByteArray)),
+            this,
+            SLOT(printThreads(QByteArray)),
+            Qt::DirectConnection);
+
+    qDebug("sockPair emitting sigData is connected to handleSig: %d", connected);
+}
+
+void UnixSignals::printThreads(QByteArray data) {
+    qDebug() << "Direct?" << QThread::currentThread();
+    qDebug() << "Direct?" << this->thread();
 }
 
 void UnixSignals::start()
