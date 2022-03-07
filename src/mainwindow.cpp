@@ -68,7 +68,6 @@ MainWindow::MainWindow() : QMainWindow()
     isUrlRealyChanged = false;
 
     handler = new UnixSignals();
-    connect(handler, SIGNAL(sigBREAK()), SLOT(unixSignalQuit()));
     connect(handler, SIGNAL(sigTERM()), SLOT(unixSignalQuit()));
     connect(handler, SIGNAL(sigINT()), SLOT(unixSignalQuit()));
     connect(handler, SIGNAL(sigHUP()), SLOT(unixSignalHup()));
@@ -103,7 +102,6 @@ void MainWindow::init(AnyOption *opts)
         connect(handler, SIGNAL(sigUSR1()), SLOT(unixSignalUsr1()));
         connect(handler, SIGNAL(sigUSR2()), SLOT(unixSignalUsr2()));
     }
-    handler->start();
 
     setMinimumWidth(320);
     setMinimumHeight(200);
@@ -303,15 +301,6 @@ void MainWindow::init(AnyOption *opts)
         qwkSettings->getBool("security/local_content_can_access_remote_urls")
     );
 
-    connect(view->page()->mainFrame(), SIGNAL(titleChanged(QString)), SLOT(adjustTitle(QString)));
-    connect(view->page()->mainFrame(), SIGNAL(loadStarted()), SLOT(startLoading()));
-    connect(view->page()->mainFrame(), SIGNAL(urlChanged(const QUrl &)), SLOT(urlChanged(const QUrl &)));
-    connect(view->page(), SIGNAL(loadProgress(int)), SLOT(setProgress(int)));
-    connect(view->page()->mainFrame(), SIGNAL(loadFinished(bool)), SLOT(finishLoading(bool)));
-    connect(view->page()->mainFrame(), SIGNAL(iconChanged()), SLOT(pageIconLoaded()));
-    connect(view, SIGNAL(qwkNetworkError(QNetworkReply::NetworkError,QString)), SLOT(handleQwkNetworkError(QNetworkReply::NetworkError,QString)));
-    connect(view, SIGNAL(qwkNetworkReplyUrl(QUrl)), SLOT(handleQwkNetworkReplyUrl(QUrl)));
-
     QNetworkConfigurationManager manager;
     QNetworkConfiguration cfg = manager.defaultConfiguration();
 
@@ -320,18 +309,40 @@ void MainWindow::init(AnyOption *opts)
     n_session->open();
 
     QDesktopWidget *desktop = QApplication::desktop();
-    connect(desktop, SIGNAL(resized(int)), SLOT(desktopResized(int)));
 
-    // Window show, start events loop
-    show();
+    QTimer::singleShot(0, this, SLOT(onEventLoopStart()));
+}
+
+/* The OS signal handler can't be installed until after the Qt event loop
+ * starts since it eventually calls `QApplication::exit(0);`, and that will
+ * cleanup anything we draw on the screen. Thus we also don't want to connect
+ * any slots that touch the what's in focus or draw on the screen until the OS
+ * signal handler is ready. `this->init()` is called in `src/main.cpp` before
+ * `app.exec()`, thus we don't do any of this in `this->init()`. Instead,
+ * `this->init()` will connect this slot, `this->onEventLoopStart()`, to the a
+ * singleShot timer, and that will call this function on the first iteration of
+ * he event loop. After installing the OS signal handler, * the OS signal
+ * handler has been installed and it is safe to draw on the screen.
+ **/
+void MainWindow::onEventLoopStart() {
+    handler->setupUnixSignalHandlers();
 
     view->setFocusPolicy(Qt::StrongFocus);
+    connect(desktop, SIGNAL(resized(int)), SLOT(desktopResized(int)));
 
     if (qwkSettings->getBool("view/hide_mouse_cursor")) {
         QApplication::setOverrideCursor(Qt::BlankCursor);
         view->setCursor(*hiddenCurdor);
-        QApplication::processEvents(); //process events to force cursor update before press
     }
+
+    connect(view->page()->mainFrame(), SIGNAL(titleChanged(QString)), SLOT(adjustTitle(QString)));
+    connect(view->page()->mainFrame(), SIGNAL(loadStarted()), SLOT(startLoading()));
+    connect(view->page()->mainFrame(), SIGNAL(urlChanged(const QUrl &)), SLOT(urlChanged(const QUrl &)));
+    connect(view->page(), SIGNAL(loadProgress(int)), SLOT(setProgress(int)));
+    connect(view->page()->mainFrame(), SIGNAL(loadFinished(bool)), SLOT(finishLoading(bool)));
+    connect(view->page()->mainFrame(), SIGNAL(iconChanged()), SLOT(pageIconLoaded()));
+    connect(view, SIGNAL(qwkNetworkError(QNetworkReply::NetworkError,QString)), SLOT(handleQwkNetworkError(QNetworkReply::NetworkError,QString)));
+    connect(view, SIGNAL(qwkNetworkReplyUrl(QUrl)), SLOT(handleQwkNetworkReplyUrl(QUrl)));
 
     int delay_resize = 1;
     if (qwkSettings->getBool("view/startup_resize_delayed")) {
@@ -345,6 +356,8 @@ void MainWindow::init(AnyOption *opts)
     }
     delayedLoad->singleShot(delay_load, this, SLOT(delayedPageLoad()));
 
+    //process events to force cursor update before press
+    QApplication::processEvents();
 }
 
 void MainWindow::delayedWindowResize()
@@ -412,7 +425,6 @@ void MainWindow::clearCacheOnExit()
 void MainWindow::cleanupSlot()
 {
     qDebug("Cleanup Slot (application exit)");
-    handler->stop();
     clearCacheOnExit();
     QWebSettings::clearMemoryCaches();
 }

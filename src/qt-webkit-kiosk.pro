@@ -149,7 +149,6 @@ SOURCES += main.cpp\
     fakewebview.cpp \
     cachingnm.cpp \
     unixsignals.cpp \
-    socketpair.cpp \
     persistentcookiejar.cpp \
     qwk_settings.cpp
 
@@ -162,7 +161,6 @@ HEADERS  += mainwindow.h \
     fakewebview.h \
     cachingnm.h \
     unixsignals.h \
-    socketpair.h \
     persistentcookiejar.h \
     qwk_settings.h
 

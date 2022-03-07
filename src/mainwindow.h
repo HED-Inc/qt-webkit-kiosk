@@ -75,6 +75,7 @@ public:
     void clearCacheOnExit();
 
 protected slots:
+    void onEventLoopStart();
 
     void cleanupSlot();
 
@@ -106,7 +107,6 @@ protected slots:
     void unixSignalUsr2();
 
 protected:
-
     void centerFixedSizeWindow();
     void attachJavascripts();
     void attachStyles();
@@ -132,6 +132,7 @@ private:
 
     AnyOption   *cmdopts;
     UnixSignals *handler;
+    QDesktopWidget *desktop;
 
 #ifdef USE_TESTLIB
     QTestEventList *simulateClick;

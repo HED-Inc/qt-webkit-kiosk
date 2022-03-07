@@ -5,7 +5,7 @@
 #include <QtWebKit>
 #include "webview.h"
 #include <signal.h>
-#include "unixsignals.h"
+#include <QApplication>
 
 #ifdef QT5
 #include <QNetworkReply>
@@ -199,7 +199,7 @@ void WebView::handleWindowCloseRequested()
         loadHomepage();
     } else {
         qDebug() << "-- exit application";
-        UnixSignals::signalHandler(SIGINT);
+        QApplication::exit(0);
     }
 }
 

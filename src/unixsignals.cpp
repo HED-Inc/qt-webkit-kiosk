@@ -1,181 +1,153 @@
 #include <signal.h>
 #include <QApplication>
 #include <QDebug>
+#include <sys/socket.h>
 #include "unixsignals.h"
 
-SocketPair UnixSignals::sockPair;
-
 /**
- * It should be created only ones
- *
  * @brief UnixSignals::UnixSignals
  * @param parent
+ *
+ * Inspired by https://doc.qt.io/qt-5/unix-signals.html
+ * This class should be created only once
+ *
  */
+
+int UnixSignals::sighupFd[2];
+int UnixSignals::sigintFd[2];
+int UnixSignals::sigtermFd[2];
+int UnixSignals::sigusr1Fd[2];
+int UnixSignals::sigusr2Fd[2];
+
 UnixSignals::UnixSignals( QObject *parent )
     : QObject(parent)
 {
-    if (!UnixSignals::sockPair.create())
-        qFatal("Unable to create signal socket pair");
+    if(::socketpair(AF_UNIX, SOCK_STREAM, 0, sighupFd)) {
+        qFatal("%s:%d:%s, Couldn't create SIGHUP socketpair. errno is: %d",
+                __FILE__, __LINE__, __func__, errno);
+    }
 
-    connect(&UnixSignals::sockPair, SIGNAL(sigData(QByteArray)), this, SLOT(handleSig(QByteArray)));
+    if(::socketpair(AF_UNIX, SOCK_STREAM, 0, sigintFd)) {
+        qFatal("%s:%d:%s, Couldn't create SIGINT socketpair. errno is: %d",
+                __FILE__, __LINE__, __func__, errno);
+    }
+
+    if(::socketpair(AF_UNIX, SOCK_STREAM, 0, sigtermFd)) {
+        qFatal("%s:%d:%s, Couldn't create SIGTERM socketpair. errno is: %d",
+                __FILE__, __LINE__, __func__, errno);
+    }
+
+    if(::socketpair(AF_UNIX, SOCK_STREAM, 0, sigusr1Fd)) {
+        qFatal("%s:%d:%s, Couldn't create SIGUSR1 socketpair. errno is: %d",
+                __FILE__, __LINE__, __func__, errno);
+    }
+
+    if(::socketpair(AF_UNIX, SOCK_STREAM, 0, sigusr2Fd)) {
+        qFatal("%s:%d:%s, Couldn't create SIGUSR2 socketpair. errno is: %d",
+                __FILE__, __LINE__, __func__, errno);
+    }
+
+    snHup = new QSocketNotifier(sighupFd[1], QSocketNotifier::Read, this);
+    connect(snHup, SIGNAL(activated(QSocketDescriptor)), this, SLOT(handleSigHup()));
+
+    snInt = new QSocketNotifier(sigintFd[1], QSocketNotifier::Read, this);
+    connect(snInt, SIGNAL(activated(QSocketDescriptor)), this, SLOT(handleSigInt()));
+
+    snTerm = new QSocketNotifier(sigtermFd[1], QSocketNotifier::Read, this);
+    connect(snTerm, SIGNAL(activated(QSocketDescriptor)), this, SLOT(handleSigTerm()));
+
+    snUsr1 = new QSocketNotifier(sigusr1Fd[1], QSocketNotifier::Read, this);
+    connect(snUsr1, SIGNAL(activated(QSocketDescriptor)), this, SLOT(handleSigUsr1()));
+
+    snUsr2 = new QSocketNotifier(sigusr2Fd[1], QSocketNotifier::Read, this);
+    connect(snUsr2, SIGNAL(activated(QSocketDescriptor)), this, SLOT(handleSigUsr2()));
 }
 
-void UnixSignals::start()
+
+void UnixSignals::setupUnixSignalHandlers()
 {
-#ifdef SIGBREAK
-    // Available on Windows
-    if (receivers(SIGNAL(sigBREAK())) > 0) {
-        if (signal(SIGBREAK, UnixSignals::signalHandler) == SIG_ERR) {
-            qFatal("Unable to set signal handler on BREAK");
-        }
-    } else {
-        qDebug("No listeners for signal BREAK");
-    }
-#else
-    qWarning("No signal BREAK defined");
-#endif
-
-#ifdef SIGTERM
-    if (receivers(SIGNAL(sigTERM())) > 0) {
-        if (signal(SIGTERM, UnixSignals::signalHandler) == SIG_ERR) {
-            qFatal("Unable to set signal handler on TERM");
-        }
-    } else {
-        qDebug("No listeners for signal TERM");
-    }
-#else
-    qWarning("No signal TERM defined");
-#endif
-
-#ifdef SIGINT
-    if (receivers(SIGNAL(sigINT())) > 0) {
-        if (signal(SIGINT, UnixSignals::signalHandler) == SIG_ERR) {
-            qFatal("Unable to set signal handler on INT");
-        }
-    } else {
-        qDebug("No listeners for signal INT");
-    }
-#else
-    qWarning("No signal INT defined");
-#endif
-
-#ifdef SIGHUP
-    // Unavailable on Windows
-    if (receivers(SIGNAL(sigHUP())) > 0) {
-        if (signal(SIGHUP, UnixSignals::signalHandler) == SIG_ERR) {
-            qFatal("Unable to set signal handler on HUP");
-        }
-    } else {
-        qDebug("No listeners for signal HUP");
-    }
-#else
-    qWarning("No signal HUP defined");
-#endif
-
-#ifdef SIGUSR1
-    // Unavailable on Windows
-    if (receivers(SIGNAL(sigUSR1())) > 0) {
-        if (signal(SIGUSR1, UnixSignals::signalHandler) == SIG_ERR) {
-            qFatal("Unable to set signal handler on USR1");
-        }
-    } else {
-        qDebug("No listeners for signal USR1");
-    }
-#else
-    qWarning("No signal USR1 defined");
-#endif
-
-#ifdef SIGUSR2
-    // Unavailable on Windows
-    if (receivers(SIGNAL(sigUSR2())) > 0) {
-        if (signal(SIGUSR2, UnixSignals::signalHandler) == SIG_ERR) {
-            qFatal("Unable to set signal handler on USR2");
-        }
-    } else {
-        qDebug("No listeners for signal USR1");
-    }
-#else
-    qWarning("No signal USR2 defined");
-#endif
+    setupUnixSignalHandler(SIGHUP, UnixSignals::hupSignalHandler);
+    setupUnixSignalHandler(SIGINT, UnixSignals::intSignalHandler);
+    setupUnixSignalHandler(SIGTERM, UnixSignals::termsignalHandler);
+    setupUnixSignalHandler(SIGUSR1, UnixSignals::usr1SignalHandler);
+    setupUnixSignalHandler(SIGUSR2, UnixSignals::usr2SignalHandler);
 }
 
-void UnixSignals::stop()
-{
-    UnixSignals::sockPair.close();
+
+// Unix signal handlers
+void UnixSignals::hupSignalHandler(int signum) {
+    ::write(sighupFd[0], &signum, sizeof(signum));
 }
 
-void UnixSignals::signalHandler(int number)
-{
-    char tmp = number;
-    qDebug() << "UnixSignals::signalHandler -- pass signal" << number;
-    UnixSignals::sockPair.input()->write(&tmp, sizeof(tmp));
+void UnixSignals::intSignalHandler(int signum) {
+    ::write(sigintFd[0], &signum, sizeof(signum));
 }
 
-void UnixSignals::handleSig(QByteArray data)
+void UnixSignals::termsignalHandler(int signum) {
+    ::write(sigtermFd[0], &signum, sizeof(signum));
+}
+
+void UnixSignals::usr1SignalHandler(int signum) {
+    ::write(sigusr1Fd[0], &signum, sizeof(signum));
+}
+
+void UnixSignals::usr2SignalHandler(int signum) {
+    ::write(sigusr2Fd[0], &signum, sizeof(signum));
+}
+
+// Qt signal handlers
+// we emit a Qt signal unique to each corresponding Unix signal, thus another
+// class can then connect to that Qt signal, and take whatever action it wants
+void UnixSignals::handleSigHup() {
+    snHup->setEnabled(false);
+    int tmp;
+    ::read(sighupFd[1], &tmp, sizeof(tmp));
+    emit sigHUP();
+    snHup->setEnabled(true);
+}
+
+void UnixSignals::handleSigInt() {
+    snInt->setEnabled(false);
+    int tmp;
+    ::read(sigintFd[1], &tmp, sizeof(tmp));
+    emit sigINT();
+    snInt->setEnabled(true);
+}
+
+void UnixSignals::handleSigTerm() {
+    snTerm->setEnabled(false);
+    int tmp;
+    ::read(sigtermFd[1], &tmp, sizeof(tmp));
+    emit sigTERM();
+    snTerm->setEnabled(true);
+}
+
+void UnixSignals::handleSigUsr1() {
+    snUsr1->setEnabled(false);
+    int tmp;
+    ::read(sigusr1Fd[1], &tmp, sizeof(tmp));
+    emit sigUSR1();
+    snUsr1->setEnabled(true);
+}
+
+void UnixSignals::handleSigUsr2() {
+    snUsr2->setEnabled(false);
+    int tmp;
+    ::read(sigusr2Fd[1], &tmp, sizeof(tmp));
+    emit sigUSR2();
+    snUsr2->setEnabled(true);
+}
+
+void UnixSignals::setupUnixSignalHandler(int signum, void (*sig_handler)(int))
 {
-    qDebug() << "Got data:" << data.toHex();
-    int number = 0, lastNumber = 0;
-    if (data.length()) {
-        qDebug() << " signals in data:" << data.length();
+    struct sigaction sigact;
+    sigact.sa_handler = sig_handler;
+    sigemptyset(&sigact.sa_mask);
+    sigact.sa_flags = 0;
+    sigact.sa_flags |= SA_RESTART;
 
-        // Socket can be filled with several signals
-        // If they come too fast...
-        while (data.length()) {
-            number = data[0];
-            data.remove(0, 1);
-
-            // Skeep repeated signals
-            if (number != lastNumber) {
-                handleSignal(number);
-                lastNumber = number;
-            }
-        }
-
+    if (sigaction(signum, &sigact, NULL)) {
+        qFatal("%s:%d:%s, Couldn't install signal handler for %d. errno is: %d",
+                __FILE__, __LINE__, __func__, signum, errno);
     }
-}
-
-void UnixSignals::handleSignal(int number)
-{
-    qDebug() << "Got signal:" << number;
-    switch (number) {
-#ifdef SIGBREAK
-        case SIGBREAK:
-            qDebug() << "Got SIGBREAK! emit event!";
-            emit sigBREAK();
-            break;
-#endif
-#ifdef SIGHUP
-        case SIGHUP:
-            qDebug() << "Got SIGHUP! emit event!";
-            emit sigHUP();
-            break;
-#endif
-#ifdef SIGINT
-        case SIGINT:
-            qDebug() << "Got SIGINT! emit event!";
-            emit sigINT();
-            break;
-#endif
-#ifdef SIGTERM
-        case SIGTERM:
-            qDebug() << "Got SIGTERM! emit event!";
-            emit sigTERM();
-            break;
-#endif
-#ifdef SIGUSR1
-        case SIGUSR1:
-            qDebug() << "Got SIGUSR1! emit event!";
-            emit sigUSR1();
-            break;
-#endif
-#ifdef SIGUSR2
-        case SIGUSR2:
-            qDebug() << "Got SIGUSR2! emit event!";
-            emit sigUSR2();
-            break;
-#endif
-        default:
-            qDebug() << "Got something? Dunno what to do...";
-    }
-
 }
